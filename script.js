@@ -27,6 +27,10 @@ let totalPages = 0;
    RENDER PDF INTO IMAGES
 ================================= */
 
+
+let BOOK_WIDTH = 550;
+let BOOK_HEIGHT = 733;
+
 async function renderPDF() {
   const pdf = await pdfjsLib.getDocument(PDF_PATH).promise;
 
@@ -34,35 +38,67 @@ async function renderPDF() {
 
   const images = [];
 
-  for (let i = 1; i <= totalPages; i++) {
+  // Detect the original dimensions of the first page.
+  const firstPage = await pdf.getPage(1);
+  const firstViewport = firstPage.getViewport({ scale: 1 });
+
+  const pageRatio = firstViewport.height / firstViewport.width;
+
+  // Use the first page's proportions for the entire book.
+  BOOK_HEIGHT = Math.round(BOOK_WIDTH * pageRatio);
+
+  // Render at 2x resolution for better clarity.
+  const targetWidth = BOOK_WIDTH * 2;
+  const targetHeight = BOOK_HEIGHT * 2;
+
+  for (let i = 1; i <= pdf.numPages; i++) {
 
     const page = await pdf.getPage(i);
 
-    // Higher scale gives better reading quality.
-    const viewport = page.getViewport({ scale: 1.5 });
+    // Original page dimensions.
+    const originalViewport = page.getViewport({ scale: 1 });
 
+    // Calculate scale without distorting the page.
+    const scale = Math.min(
+      targetWidth / originalViewport.width,
+      targetHeight / originalViewport.height
+    );
+
+    const viewport = page.getViewport({ scale });
+
+    // Common canvas for every page.
     const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
 
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const context = canvas.getContext("2d", {
+      alpha: false
+    });
+
+    // White background.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, targetWidth, targetHeight);
+
+    // Center the original page without stretching.
+    const offsetX = (targetWidth - viewport.width) / 2;
+    const offsetY = (targetHeight - viewport.height) / 2;
 
     await page.render({
       canvasContext: context,
-      viewport: viewport
+      viewport: viewport,
+      transform: [1, 0, 0, 1, offsetX, offsetY]
     }).promise;
 
-    // Convert the page into an image.
-    const imageURL = canvas.toDataURL("image/jpeg", 0.88);
-
-    images.push(imageURL);
+    // Export high-quality image.
+    images.push(canvas.toDataURL("image/jpeg", 0.94));
 
     // Release canvas memory.
     canvas.width = 0;
     canvas.height = 0;
 
     loadingText.textContent =
-      `Loading page ${i} of ${totalPages}...`;
+      `Optimizing pages... ${i}/${totalPages}`;
   }
 
   return images;
@@ -101,8 +137,8 @@ async function initializeBook() {
     pageFlip = new St.PageFlip(bookElement, {
 
       // Base dimensions of one page.
-      width: 550,
-      height: 733,
+      width: BOOK_WIDTH,
+      height: BOOK_HEIGHT,
 
       // Automatically adapt to container.
       size: "stretch",
@@ -110,8 +146,8 @@ async function initializeBook() {
       minWidth: 250,
       maxWidth: 550,
 
-      minHeight: 330,
-      maxHeight: 1100,
+      minHeight: Math.round(250 * BOOK_HEIGHT / BOOK_WIDTH),
+      maxHeight: Math.round(550 * BOOK_HEIGHT / BOOK_WIDTH),
 
       // Responsive orientation.
       usePortrait: true,
